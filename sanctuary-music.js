@@ -1,0 +1,50 @@
+// Synthesized parkour arrangement; user-provided adventure/boss recordings and credited SFX.
+(() => {
+ const button=document.createElement('button');button.id='sanctuaryMusic';button.textContent='Music on';button.setAttribute('aria-pressed','true');Object.assign(button.style,{position:'absolute',left:'20px',top:'20px',zIndex:'3',font:'11px system-ui',background:'#172a2ddd'});stage.append(button);
+ let enabled=true,bossEnabled=true,context,music,fx,compressor,guitarBus,noise,timer,step=0,nextTime=0,mode=null,wanted=null,held=false,version=0,lastBro=-100,lastOof=-100;
+ let adventureSource=null,adventureOffset=0,adventureStarted=0,adventureReady;
+ let bossSource=null,bossOffset=0,bossStarted=0,bossReady;
+ const samples={},hz=n=>440*Math.pow(2,(n-69)/12);
+ const chords=[[50,57,62,66],[47,54,59,62],[43,50,55,59],[45,52,57,61],[52,59,64,67],[43,50,59,62],[50,57,62,66],[45,52,57,64]];
+ const tune=[74,null,78,81,83,81,78,null,76,74,null,71,74,null,78,76,74,null,71,74,79,78,74,null,73,76,null,81,78,76,73,null,76,null,79,83,81,79,76,null,74,71,74,null,79,78,74,null,78,81,86,null,83,81,78,76,73,null,76,81,78,76,74,null];
+ function boot(){if(context)return;context=new AudioContext();compressor=context.createDynamicsCompressor();compressor.threshold.value=-10;compressor.knee.value=15;compressor.ratio.value=5;compressor.attack.value=.004;compressor.release.value=.18;compressor.connect(context.destination);music=context.createGain();music.gain.value=0;music.connect(compressor);fx=context.createGain();fx.gain.value=.8;fx.connect(compressor);
+  adventureReady=fetch('adventure-theme.mp3').then(r=>{if(!r.ok)throw Error('Adventure music unavailable');return r.arrayBuffer()}).then(b=>context.decodeAudioData(b)).then(b=>samples.adventure=b).catch(e=>console.warn(e.message));
+  bossReady=fetch('boss-theme.mp3').then(r=>{if(!r.ok)throw Error('Boss music unavailable');return r.arrayBuffer()}).then(b=>context.decodeAudioData(b)).then(b=>samples.boss=b).catch(e=>console.warn(e.message));
+  const distortion=context.createWaveShaper(),curve=new Float32Array(4096);for(let i=0;i<curve.length;i++){const x=i*2/curve.length-1;curve[i]=Math.tanh(5*x)}distortion.curve=curve;distortion.oversample='2x';const filter=context.createBiquadFilter();filter.type='lowpass';filter.frequency.value=2800;guitarBus=context.createGain();guitarBus.gain.value=.23;distortion.connect(filter).connect(guitarBus).connect(music);guitarBus.input=distortion;
+  noise=context.createBuffer(1,context.sampleRate,context.sampleRate);const d=noise.getChannelData(0);let seed=113;for(let i=0;i<d.length;i++){seed=(seed*16807)%2147483647;d[i]=seed/1073741824-1}
+  for(const [name,url] of [['bruh','bruh.mp3'],['oof','platform-oof.mp3'],['fight','fight-call.wav']])fetch(url).then(r=>{if(!r.ok)throw Error('Audio unavailable');return r.arrayBuffer()}).then(b=>context.decodeAudioData(b)).then(b=>samples[name]=b).catch(()=>{});
+ }
+ function oscillator(freq,t,duration,volume,type='sine',attack=.015,destination=music){const o=context.createOscillator(),g=context.createGain();o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(Math.max(.0002,volume),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);o.connect(g).connect(destination);o.start(t);o.stop(t+duration+.02);return o}
+ function hiss(t,duration,volume,cutoff){const source=context.createBufferSource(),f=context.createBiquadFilter(),g=context.createGain();source.buffer=noise;f.type='highpass';f.frequency.value=cutoff;g.gain.setValueAtTime(volume,t);g.gain.exponentialRampToValueAtTime(.0001,t+duration);source.connect(f).connect(g).connect(music);source.start(t);source.stop(t+duration)}
+ function kick(t){const o=oscillator(130,t,.23,.48);o.frequency.exponentialRampToValueAtTime(43,t+.17)}
+ function guitar(n,t,length){oscillator(hz(n),t,length,.32,'sawtooth',.008,guitarBus.input);oscillator(hz(n+7)*1.002,t,length,.16,'sawtooth',.008,guitarBus.input)}
+ function adventure(i,t){const bar=Math.floor(i/8)%8,beat=i%8,chord=chords[bar];if(beat===0){for(const n of chord){oscillator(hz(n),t,2.7,.045,'triangle',.3);oscillator(hz(n)*1.003,t,2.6,.016,'sine',.3)}}const arp=chord[[0,2,1,2,3,2,1,2][beat]]+12;oscillator(hz(arp),t,.7,.075,'triangle',.008);oscillator(hz(arp+12),t,.35,.018);
+  const n=tune[i%64];if(n!==null){oscillator(hz(n),t,.58,.11,'sine',.05);oscillator(hz(n+12),t,.5,.018,'sine',.05)}if(beat===0||beat===4){const drum=oscillator(115,t,.18,.085);drum.frequency.exponentialRampToValueAtTime(65,t+.14)}if(beat%2===1)hiss(t,.055,.023,3500);
+ }
+ function bossTrack(i,t){const bar=Math.floor(i/8)%8,beat=i%8,root=[40,40,38,36,40,43,36,38][bar],pattern=[0,null,0,7,0,3,null,10];if(pattern[beat]!==null){guitar(root+pattern[beat],t,beat===7?.18:.13);oscillator(hz(root-12+pattern[beat]),t,.2,.18,'triangle')}
+  if([0,3,4].includes(beat)||bar%2&&beat===7)kick(t);if(beat===2||beat===6){hiss(t,.19,.24,1200);oscillator(180,t,.12,.13,'triangle')}hiss(t,beat===7?.13:.035,beat%2?.055:.075,6500);if(bar===7&&beat>=6)guitar(root+12,t,.22);
+ }
+ function schedule(){while(nextTime<context.currentTime+.2){if(mode==='adventure')adventure(step,nextTime);else if(mode==='parkour')bossTrack(step,nextTime);step++;nextTime+=60/(mode==='parkour'?124:92)/2}}
+ function pauseBossTrack(){if(!bossSource)return;bossOffset=(bossOffset+context.currentTime-bossStarted)%samples.boss.duration;bossSource.stop();bossSource.disconnect();bossSource=null}
+ function pauseAdventureTrack(){if(!adventureSource)return;adventureOffset=(adventureOffset+context.currentTime-adventureStarted)%samples.adventure.duration;adventureSource.stop();adventureSource.disconnect();adventureSource=null}
+ async function setMode(next){wanted=next;boot();const id=++version;clearInterval(timer);pauseBossTrack();pauseAdventureTrack();if(next!=='adventure')adventureOffset=0;if(next!=='boss')bossOffset=0;fx.gain.setTargetAtTime(next==='boss'&&!bossEnabled?0:.8,context.currentTime,.03);const allowed=next&&(next==='boss'?bossEnabled:enabled)&&!document.hidden&&!held;if(!allowed){mode=null;music.gain.cancelScheduledValues(context.currentTime);music.gain.setTargetAtTime(0,context.currentTime,.12);return}await context.resume();if(next==='boss')await bossReady;if(next==='adventure')await adventureReady;if(id!==version)return;mode=next;step=0;nextTime=context.currentTime+.06;music.gain.cancelScheduledValues(context.currentTime);music.gain.setTargetAtTime(next==='adventure'?.65:.75,context.currentTime,.2);if(next==='boss'){if(!samples.boss)return;bossSource=context.createBufferSource();bossSource.buffer=samples.boss;bossSource.loop=true;bossSource.connect(music);bossStarted=context.currentTime;bossSource.start(0,bossOffset)}else if(next==='adventure'){if(!samples.adventure)return;adventureSource=context.createBufferSource();adventureSource.buffer=samples.adventure;adventureSource.loop=true;adventureSource.connect(music);adventureStarted=context.currentTime;adventureSource.start(0,adventureOffset)}else{schedule();timer=setInterval(schedule,80)}}
+ function sanctuary(){if(wanted==='boss'&&!document.getElementById('bossLayer').hidden)return;const crystal=!stage.hidden&&!stage.inert&&document.getElementById('opening').hidden;setMode(!course.hidden?'parkour':crystal?'adventure':null)}
+ function duck(duration){if(!mode)return;const now=context.currentTime,base=mode==='adventure'?.65:.75;music.gain.cancelAndHoldAtTime(now);music.gain.linearRampToValueAtTime(base*.22,now+.04);music.gain.setTargetAtTime(base,now+duration+.12,.2)}
+ function sample(name,rate=1){if(!samples[name])return false;const source=context.createBufferSource();source.buffer=samples[name];source.playbackRate.value=rate;source.connect(fx);duck(source.buffer.duration/rate);source.start();return true}
+ window.GameAudio={
+  unlock(){boot();context.resume();if(!wanted)sanctuary()},
+  boss(){held=false;bossOffset=0;setMode('boss')},stop(){held=false;setMode(null)},pause(){held=true;setMode(wanted)},resume(){held=false;setMode(wanted)},
+  bossSound(on){bossEnabled=on;if(context)fx.gain.setTargetAtTime(on?.8:0,context.currentTime,.03);if(wanted==='boss')setMode('boss');},
+  fight(){boot();context.resume();if(!bossEnabled)return;for(let j=0;j<3;j++){const t=context.currentTime+j*.23;for(const [ratio,level] of [[1,.28],[2.76,.12],[5.4,.045]])oscillator(720*ratio,t,1-j*.1,level,'sine',.003,fx)}if(!sample('fight',.88)&&'speechSynthesis' in window){const voice=new SpeechSynthesisUtterance('Fight!');voice.rate=.9;voice.pitch=.7;speechSynthesis.speak(voice)}},
+  fall(){boot();context.resume();if(context.currentTime-lastOof<.3)return;lastOof=context.currentTime;sample('oof')},
+  playerFall(){boot();context.resume();if(context.currentTime-lastBro<1)return;lastBro=context.currentTime;sample('bruh')},
+  status(){return {mode,wanted,volume:mode==='adventure'?.65:.75,bossPlaying:!!bossSource,adventurePlaying:!!adventureSource,context:context?.state,samples:Object.keys(samples)}}
+ };
+ window.addEventListener('pointerdown',()=>{boot();context.resume();sanctuary()},{once:true});window.addEventListener('keydown',()=>{boot();context.resume();sanctuary()},{once:true});
+ document.getElementById('openingNext').addEventListener('click',()=>{boot();context.resume()});
+ const courseButton=button.cloneNode(true);courseButton.id='parkourMusic';courseButton.style.top='auto';courseButton.style.bottom='16px';courseButton.style.left='auto';courseButton.style.right='20px';course.append(courseButton);
+ button.onclick=()=>{enabled=!enabled;button.textContent=enabled?'Music on':'Music off';button.setAttribute('aria-pressed',enabled);courseButton.textContent=button.textContent;courseButton.setAttribute('aria-pressed',enabled);sanctuary()};
+ courseButton.onclick=button.onclick;
+ const watcher=new MutationObserver(()=>{if(context)sanctuary()});watcher.observe(stage,{attributes:true,attributeFilter:['hidden','inert']});watcher.observe(course,{attributes:true,attributeFilter:['hidden']});
+ document.addEventListener('visibilitychange',()=>{if(context)setMode(wanted)});
+})();
